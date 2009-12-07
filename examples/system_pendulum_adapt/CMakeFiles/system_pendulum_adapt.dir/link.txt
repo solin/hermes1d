@@ -1,0 +1,1 @@
+/usr/bin/c++      CMakeFiles/system_pendulum_adapt.dir/main.cpp.o  -o system_pendulum_adapt -rdynamic ../../src/libhermes1d.so -lumfpack -lamd -lblas -Wl,-rpath,/home/pavel/hermes1d/src 

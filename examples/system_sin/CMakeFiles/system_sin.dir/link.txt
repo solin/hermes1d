@@ -1,0 +1,1 @@
+/usr/bin/c++      CMakeFiles/system_sin.dir/main.cpp.o  -o system_sin -rdynamic ../../src/libhermes1d.so -lumfpack -lamd -lblas -Wl,-rpath,/home/pavel/hermes1d/src 

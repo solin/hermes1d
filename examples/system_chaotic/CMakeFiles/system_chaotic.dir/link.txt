@@ -1,0 +1,1 @@
+/usr/bin/c++      CMakeFiles/system_chaotic.dir/main.cpp.o  -o system_chaotic -rdynamic ../../src/libhermes1d.so -lumfpack -lamd -lblas -Wl,-rpath,/home/pavel/hermes1d/src 

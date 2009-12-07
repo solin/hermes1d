@@ -1,0 +1,1 @@
+/usr/bin/c++      CMakeFiles/lobatto-2.dir/main.cpp.o  -o lobatto-2 -rdynamic ../../src/libhermes1d.so -lumfpack -lamd -lblas -Wl,-rpath,/home/pavel/hermes1d/src 
