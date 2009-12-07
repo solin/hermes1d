@@ -10,18 +10,19 @@
 
 #include "mesh.h"
 #include "quad_std.h"
+#include "legendre.h"
 #include "lobatto.h"
 #include "matrix.h"
 #include "iterator.h"
 
 typedef double (*matrix_form) (int num, double *x, double *weights,
         double *u, double *dudx, double *v, double *dvdx, 
-        double u_prev[MAX_EQN_NUM][MAX_PTS_NUM],
-        double du_prevdx[MAX_EQN_NUM][MAX_PTS_NUM], void *user_data);
+        double u_prev[MAX_EQN_NUM][MAX_QUAD_PTS_NUM],
+        double du_prevdx[MAX_EQN_NUM][MAX_QUAD_PTS_NUM], void *user_data);
 
 typedef double (*vector_form) (int num, double *x, double *weights,
-        double u_prev[MAX_EQN_NUM][MAX_PTS_NUM], 
-               double du_prevdx[MAX_EQN_NUM][MAX_PTS_NUM], 
+        double u_prev[MAX_EQN_NUM][MAX_QUAD_PTS_NUM], 
+               double du_prevdx[MAX_EQN_NUM][MAX_QUAD_PTS_NUM], 
                double *v, double *dvdx,
         void *user_data);
 
@@ -36,27 +37,23 @@ typedef double (*vector_form_surf) (double x, double *u_prev,
 class DiscreteProblem {
 
 public:
-    DiscreteProblem(Mesh *mesh);
-
+    DiscreteProblem();
     void add_matrix_form(int i, int j, matrix_form fn);
     void add_vector_form(int i, vector_form fn);
     void add_matrix_form_surf(int i, int j, matrix_form_surf fn, int bdy_index);
     void add_vector_form_surf(int i, vector_form_surf fn, int bdy_index);
     // c is solution component
-    void process_vol_forms(Matrix *mat, double *res, 
+    void process_vol_forms(Mesh *mesh, Matrix *mat, double *res, 
                            double *y_prev, int matrix_flag);
     // c is solution component
-    void process_surf_forms(Matrix *mat, double *res, double *y_prev, 
+    void process_surf_forms(Mesh *mesh, Matrix *mat, double *res, double *y_prev, 
                             int matrix_flag, int bdy_index);
-    void assemble(Matrix *mat, double *res, double *y_prev, int matrix_flag);
-    void assemble_matrix_and_vector(Matrix *mat, double *res, double *y_prev); 
-    void assemble_matrix(Matrix *mat, double *y_prev);
-    void assemble_vector(double *res, double *y_prev);
+    void assemble(Mesh *mesh, Matrix *mat, double *res, double *y_prev, int matrix_flag);
+    void assemble_matrix_and_vector(Mesh *mesh, Matrix *mat, double *res, double *y_prev); 
+    void assemble_matrix(Mesh *mesh, Matrix *mat, double *y_prev);
+    void assemble_vector(Mesh *mesh, double *res, double *y_prev);
 
 private:
-    int n_eq;
-    Mesh *mesh;
-
 	struct MatrixFormVol {
 		int i, j;
 		matrix_form fn;
@@ -92,5 +89,7 @@ void element_shapefn(double a, double b,
 
 void element_shapefn_point(double x_ref, double a, double b, 
 			   int k, double *val, double *der);
+
+int newton(DiscreteProblem *dp, Mesh *mesh, double *y_prev, double tol, int &iter_num); 
 
 #endif

@@ -16,7 +16,7 @@ void Linearizer::eval_approx(Element *e, double x_ref, double *y,
   for(int c=0; c<n_eq; c++) { // loop over solution components
     val[c] = 0;
     for(int i=0; i <= e->p; i++) { // loop over shape functions
-      if(e->dof[c][i] >= 0) val[c] += y[e->dof[c][i]]*lobatto_fn_tab_1d[i](x_ref);
+      if(e->dof[c][i] >= 0) val[c] += y[e->dof[c][i]]*lobatto_val_ref(x_ref, i);
     }
   }
   double a = e->x1;
@@ -98,37 +98,36 @@ void Linearizer::get_xy(double *y_prev, int comp,
         error("number of equations too high in plot_solution().");
     }
     // FIXME
-    if(plotting_elem_subdivision > MAX_PTS_NUM)
+    if(plotting_elem_subdivision > MAX_PLOT_PTS_NUM)
         error("plotting_elem_subdivision too high in plot_solution().");
-    double phys_u_prev[MAX_EQN_NUM][MAX_PTS_NUM];
-    double phys_du_prevdx[MAX_EQN_NUM][MAX_PTS_NUM];
+    double phys_u_prev[MAX_EQN_NUM][MAX_PLOT_PTS_NUM];
+    double phys_du_prevdx[MAX_EQN_NUM][MAX_PLOT_PTS_NUM];
         
     Element *e;
     int counter = 0;
     while ((e = I->next_active_element()) != NULL) {
-        if (counter >= n_active_elem)
+        //printf("linearizer: in element (%g, %g)\n", e->x1, e->x2);
+        if (counter >= n_active_elem) {
+	  printf("n_active_elem = %d\n", n_active_elem);
+	  printf("counter = %d\n", counter);
             error("Internal error: wrong n_active_elem");
-        // FIXME:
-        if(e->p > MAX_POLYORDER)
-            error("element degree too hign in plot(solution).");
+        }
         double coeffs[MAX_EQN_NUM][MAX_COEFFS_NUM];
         e->get_coeffs(y_prev, coeffs, 
                       this->mesh->bc_left_dir_values,
                       this->mesh->bc_right_dir_values);
 
-        double pts_array[MAX_PTS_NUM];
-        double h = 2./plotting_elem_subdivision;
+        double x_phys[MAX_PLOT_PTS_NUM];
+        double h = (e->x2 - e->x1)/plotting_elem_subdivision;
 
         for (int j=0; j<plotting_elem_subdivision+1; j++)
-            pts_array[j] = -1 + j*h;
-        e->get_solution(coeffs,
-                plotting_elem_subdivision+1, pts_array,
+            x_phys[j] = e->x1 + j*h;
+        e->get_solution_plot(coeffs, plotting_elem_subdivision+1, x_phys,
                 phys_u_prev, phys_du_prevdx);
         double a = e->x1;
         double b = e->x2;
         for (int j=0; j<plotting_elem_subdivision+1; j++) {
-            x_out[counter*(plotting_elem_subdivision+1) + j] =
-                (a + b)/2 + pts_array[j] * (b-a)/2;
+            x_out[counter*(plotting_elem_subdivision+1) + j] = x_phys[j];
             y_out[counter*(plotting_elem_subdivision+1) + j] =
                 phys_u_prev[comp][j];
         }

@@ -4,10 +4,25 @@
 // Email: hermes1d@googlegroups.com, home page: http://hpfem.org/
 
 #include "discrete.h"
+#include "solver_umfpack.h"
 
-DiscreteProblem::DiscreteProblem(Mesh *mesh)
-{
-    this->mesh = mesh;
+DiscreteProblem::DiscreteProblem() {
+  // precalculating values and derivatives 
+  // of all polynomials at all possible 
+  // integration points
+  fprintf(stderr, "Precalculating Legendre polynomials...");
+  fflush(stderr);
+  precalculate_legendre_1d();
+  precalculate_legendre_1d_left();
+  precalculate_legendre_1d_right();
+  fprintf(stderr, "done.\n");
+
+  fprintf(stderr, "Precalculating Lobatto shape functions...");
+  fflush(stderr);
+  precalculate_lobatto_1d();
+  precalculate_lobatto_1d_left();
+  precalculate_lobatto_1d_right();
+  fprintf(stderr, "done.\n");
 }
 
 void DiscreteProblem::add_matrix_form(int i, int j, matrix_form fn)
@@ -35,52 +50,46 @@ void DiscreteProblem::add_vector_form_surf(int i, vector_form_surf fn, int bdy_i
 }
 
 // process volumetric weak forms
-void DiscreteProblem::process_vol_forms(Matrix *mat, double *res, 
+void DiscreteProblem::process_vol_forms(Mesh *mesh, Matrix *mat, double *res, 
 					double *y_prev, int matrix_flag) {
-  int n_eq = this->mesh->get_n_eq();
-  Element *elems = this->mesh->get_base_elems();
-  int n_elem = this->mesh->get_n_base_elem();
-  Iterator *I = new Iterator(this->mesh);
+  int n_eq = mesh->get_n_eq();
+  Element *elems = mesh->get_base_elems();
+  int n_elem = mesh->get_n_base_elem();
+  Iterator *I = new Iterator(mesh);
 
   Element *e;
   while ((e = I->next_active_element()) != NULL) {
     //printf("Processing elem %d\n", m);
     // variables to store quadrature data
-    // FIXME: now maximum number of Gauss points is [MAX_EQN_NUM][MAX_PTS_NUM]0
-    int    pts_num = 0;       // num of quad points
-    double phys_pts[MAX_PTS_NUM];                  // quad points
-    double phys_weights[MAX_PTS_NUM];              // quad weights
-    double phys_u[MAX_PTS_NUM];                    // basis function 
-    double phys_dudx[MAX_PTS_NUM];                 // basis function x-derivative
-    double phys_v[MAX_PTS_NUM];                    // test function
-    double phys_dvdx[MAX_PTS_NUM];                 // test function x-derivative
-    // FIXME: now maximum limit of equations is [MAX_EQN_NUM][MAX_PTS_NUM], 
-    // and number of Gauss points is limited to [MAX_EQN_NUM][MAX_PTS_NUM]0
+    // FIXME: now maximum number of Gauss points is [MAX_EQN_NUM][MAX_QUAD_PTS_NUM]0
+    int    pts_num;                                     // num of quad points
+    double phys_pts[MAX_QUAD_PTS_NUM];                  // quad points
+    double phys_weights[MAX_QUAD_PTS_NUM];              // quad weights
+    double phys_u[MAX_QUAD_PTS_NUM];                    // basis function 
+    double phys_dudx[MAX_QUAD_PTS_NUM];                 // basis function x-derivative
+    double phys_v[MAX_QUAD_PTS_NUM];                    // test function
+    double phys_dvdx[MAX_QUAD_PTS_NUM];                 // test function x-derivative
+    // FIXME: now maximum limit of equations is [MAX_EQN_NUM][MAX_QUAD_PTS_NUM], 
+    // and number of Gauss points is limited to [MAX_EQN_NUM][MAX_QUAD_PTS_NUM]0
     if(n_eq > MAX_EQN_NUM) error("number of equations too high in process_vol_forms().");
-    double phys_u_prev[MAX_EQN_NUM][MAX_PTS_NUM];     // previous solution, all components
-    double phys_du_prevdx[MAX_EQN_NUM][MAX_PTS_NUM];  // previous solution x-derivative, all components
+    double phys_u_prev[MAX_EQN_NUM][MAX_QUAD_PTS_NUM];     // previous solution, all components
+    double phys_du_prevdx[MAX_EQN_NUM][MAX_QUAD_PTS_NUM];  // previous solution x-derivative, all components
     // decide quadrature order and set up 
     // quadrature weights and points in element m
     // FIXME: for some equations this may not be enough!
-    int order = 20; // 2*e->p;
+    int order = 4*e->p;
 
-    // prepare quadrature points and weights in physical element m
-    create_element_quadrature(e->x1, e->x2,  
-	               order, phys_pts, phys_weights, &pts_num); 
-
-    // prepare quadrature points in reference interval (-1, 1)
-    double ref_pts_array[MAX_PTS_NUM];
-    double2 *ref_tab = g_quad_1d_std.get_points(order);
-    for (int j=0; j<pts_num; j++) ref_pts_array[j] = ref_tab[j][0];
+    // prepare quadrature points and weights in element 'e'
+    create_phys_element_quadrature(e->x1, e->x2,  
+                               order, phys_pts, phys_weights, &pts_num); 
 
     // evaluate previous solution and its derivative 
     // at all quadrature points in the element, 
     // for every solution component
-    double coeffs[MAX_EQN_NUM][MAX_COEFFS_NUM];
-    e->get_coeffs(y_prev, coeffs, this->mesh->bc_left_dir_values,
-                  this->mesh->bc_right_dir_values); 
-    e->get_solution(coeffs, pts_num, 
-                    ref_pts_array, phys_u_prev, phys_du_prevdx); 
+    // 0... in the entire element
+    e->get_solution_quad(0, order, y_prev, 
+                         phys_u_prev, phys_du_prevdx,
+                         mesh->bc_left_dir_values, mesh->bc_right_dir_values); 
 
     // volumetric bilinear forms
     if(matrix_flag == 0 || matrix_flag == 1) 
@@ -95,6 +104,7 @@ void DiscreteProblem::process_vol_forms(Matrix *mat, double *res,
 	for(int i=0; i<e->p + 1; i++) {
 	  // if i-th test function is active
 	  int pos_i = e->dof[c_i][i]; // row in matrix
+          //printf("elem (%g, %g): pos_i = %d\n", e->x1, e->x2, pos_i);
 	  if(pos_i != -1) {
 	    // transform i-th test function to element 'm'
 	    element_shapefn(e->x1, e->x2,  
@@ -169,14 +179,14 @@ void DiscreteProblem::process_vol_forms(Matrix *mat, double *res,
 }
 
 // process boundary weak forms
-void DiscreteProblem::process_surf_forms(Matrix *mat, double *res, 
+void DiscreteProblem::process_surf_forms(Mesh *mesh, Matrix *mat, double *res, 
 					 double *y_prev, int matrix_flag, 
                                          int bdy_index) {
-  Iterator *I = new Iterator(this->mesh);
+  Iterator *I = new Iterator(mesh);
   Element *e; 
 
   // evaluate previous solution and its derivative at the end point
-  // FIXME: maximum number of equations limited by [MAX_EQN_NUM][MAX_PTS_NUM]
+  // FIXME: maximum number of equations limited by [MAX_EQN_NUM][MAX_QUAD_PTS_NUM]
   double phys_u_prev[MAX_EQN_NUM], 
          phys_du_prevdx[MAX_EQN_NUM]; // at the end point
 
@@ -185,22 +195,18 @@ void DiscreteProblem::process_surf_forms(Matrix *mat, double *res,
   if(bdy_index == BOUNDARY_LEFT) {
     e = I->first_active_element(); 
     x_ref = -1; // left end of reference element
-    x_phys = this->mesh->get_left_endpoint();
+    x_phys = mesh->get_left_endpoint();
   }
   else {
     e = I->last_active_element(); 
     x_ref = 1;  // right end of reference element
-    x_phys = this->mesh->get_right_endpoint();
+    x_phys = mesh->get_right_endpoint();
   }
 
-  // calculate coefficients of shape functions on element m
-  double coeffs[MAX_EQN_NUM][MAX_COEFFS_NUM];
-  e->get_coeffs(y_prev, coeffs, this->mesh->bc_left_dir_values,
-                this->mesh->bc_right_dir_values); 
-
   // get solution value and derivative at the boundary point
-  e->get_solution_point(x_ref, coeffs,
-                        phys_u_prev, phys_du_prevdx); 
+  e->get_solution_point(x_phys, phys_u_prev, phys_du_prevdx,
+                        y_prev, mesh->bc_left_dir_values,
+                        mesh->bc_right_dir_values); 
 
   // surface bilinear forms
   if(matrix_flag == 0 || matrix_flag == 1) {
@@ -281,26 +287,26 @@ void DiscreteProblem::process_surf_forms(Matrix *mat, double *res,
 // matrix_flag == 2... assembling residual vector only
 // NOTE: Simultaneous assembling of the Jacobi matrix and residual
 // vector is more efficient than if they are assembled separately
-void DiscreteProblem::assemble(Matrix *mat, double *res, 
+void DiscreteProblem::assemble(Mesh *mesh, Matrix *mat, double *res, 
               double *y_prev, int matrix_flag) {
   // number of equations in the system
-  int n_eq = this->mesh->get_n_eq();
+  int n_eq = mesh->get_n_eq();
 
   // total number of unknowns
-  int n_dof = this->mesh->get_n_dof();
+  int n_dof = mesh->get_n_dof();
 
   // erase residual vector
   if(matrix_flag == 0 || matrix_flag == 2) 
     for(int i=0; i<n_dof; i++) res[i] = 0;
 
   // process volumetric weak forms via an element loop
-  process_vol_forms(mat, res, y_prev, matrix_flag);
+  process_vol_forms(mesh, mat, res, y_prev, matrix_flag);
 
   // process surface weak forms for the left boundary
-  process_surf_forms(mat, res, y_prev, matrix_flag, BOUNDARY_LEFT);
+  process_surf_forms(mesh, mat, res, y_prev, matrix_flag, BOUNDARY_LEFT);
 
   // process surface weak forms for the right boundary
-  process_surf_forms(mat, res, y_prev, matrix_flag, BOUNDARY_RIGHT);
+  process_surf_forms(mesh, mat, res, y_prev, matrix_flag, BOUNDARY_RIGHT);
 
   // DEBUG: print Jacobi matrix
   if(DEBUG && (matrix_flag == 0 || matrix_flag == 1)) {
@@ -323,23 +329,76 @@ void DiscreteProblem::assemble(Matrix *mat, double *res,
 } 
 
 // construct both the Jacobi matrix and the residual vector
-void DiscreteProblem::assemble_matrix_and_vector(Matrix *mat, double *res, double *y_prev) {
-  assemble(mat, res, y_prev, 0);
+void DiscreteProblem::assemble_matrix_and_vector(Mesh *mesh, 
+                      Matrix *mat, double *res, double *y_prev) {
+  assemble(mesh, mat, res, y_prev, 0);
 } 
 
 // construct Jacobi matrix only
-void DiscreteProblem::assemble_matrix(Matrix *mat, double *y_prev) {
+void DiscreteProblem::assemble_matrix(Mesh *mesh, Matrix *mat, double *y_prev) {
   double *void_res = NULL;
-  assemble(mat, void_res, y_prev, 1);
+  assemble(mesh, mat, void_res, y_prev, 1);
 } 
 
 // construct residual vector only
-void DiscreteProblem::assemble_vector(double *res, double *y_prev) {
+void DiscreteProblem::assemble_vector(Mesh *mesh, double *res, 
+                                      double *y_prev) {
   Matrix *void_mat = NULL;
-  assemble(void_mat, res, y_prev, 2);
+  assemble(mesh, void_mat, res, y_prev, 2);
 } 
 
+// Newton's iteration
+int newton(DiscreteProblem *dp, Mesh *mesh, 
+           double *y_prev, double tol, int &iter_num) 
+{
+  iter_num = 1;
+  int n_dof = mesh->get_n_dof();
+  double *res = new double[n_dof];
+  if (res == NULL)
+    error("res could not be allocated in newton().");
 
+  CooMatrix *mat = NULL;
+  while (1) {
+    // Reset the matrix:
+    if (mat != NULL) delete mat;
+    mat = new CooMatrix();
+
+    // construct residual vector
+    dp->assemble_matrix_and_vector(mesh, mat, res, y_prev); 
+
+    // calculate L2 norm of residual vector
+    double res_norm = 0;
+    for(int i=0; i<n_dof; i++) res_norm += res[i]*res[i];
+    res_norm = sqrt(res_norm);
+
+    // If residual norm less than 'tol', quit
+    // latest solution is in y_prev
+    // CAUTION: at least one full iteration forced
+    //          here because sometimes the initial
+    //          residual on fine mesh is too small
+    printf("Residual norm: %.15f\n", res_norm);
+    if(res_norm < tol && iter_num > 1) break;
+
+    // changing sign of vector res
+    for(int i=0; i<n_dof; i++) res[i]*= -1;
+
+    // solving the matrix system
+    //solve_linear_system_umfpack((CooMatrix*)mat, res);
+    solve_linear_system_umfpack((CooMatrix*)mat, res);
+
+    // updating y_prev by new solution which is in res
+    for(int i=0; i<n_dof; i++) y_prev[i] += res[i];
+
+    iter_num++;
+    if (iter_num >= MAX_NEWTON_ITER_NUM) 
+      return 0; // no success
+  }
+  if (mat != NULL) delete mat;
+  if (res != NULL) delete [] res;
+
+  // finished successfully
+  return 1;
+}
 
 
 

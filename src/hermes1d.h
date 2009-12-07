@@ -12,13 +12,18 @@
 #include <math.h>
 #include <string.h>
 
+#include "quad_std.h"
 #include "common.h"
 #include "mesh.h"
 #include "matrix.h"
 #include "quad_std.h"
+#include "legendre.h"
 #include "lobatto.h"
 #include "discrete.h"
 #include "linearizer.h"
 #include "transforms.h"
+#include "adapt.h"
+#include "solver_umfpack.h"
+#include "graph.h"
 
 #endif
